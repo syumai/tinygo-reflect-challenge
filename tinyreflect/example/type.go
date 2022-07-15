@@ -44,6 +44,66 @@ type structType struct {
 	fields  []structField // sorted by offset
 }
 
+// Field returns the i'th struct field.
+func (t *structType) Field(i int) (f StructField) {
+	if i < 0 || i >= len(t.fields) {
+		panic("reflect: Field index out of bounds")
+	}
+	p := &t.fields[i]
+	//f.Type = toType(p.typ)
+	f.Name = p.name.name()
+	//f.Anonymous = p.embedded()
+	//if !p.name.isExported() {
+	//	f.PkgPath = t.pkgPath.name()
+	//}
+	//if tag := p.name.tag(); tag != "" {
+	//	f.Tag = StructTag(tag)
+	//}
+	f.Offset = p.offset
+
+	// NOTE(rsc): This is the only allocation in the interface
+	// presented by a reflect.Type. It would be nice to avoid,
+	// at least in the common cases, but we need to make sure
+	// that misbehaving clients of reflect cannot affect other
+	// uses of reflect. One possibility is CL 5371098, but we
+	// postponed that ugliness until there is a demonstrated
+	// need for the performance. This is issue 2320.
+	f.Index = []int{i}
+	return
+}
+
+func (n name) name() (s string) {
+	if n.bytes == nil {
+		return
+	}
+	i, l := n.readVarint(1)
+	hdr := (*unsafeString)(unsafe.Pointer(&s))
+	hdr.Data = unsafe.Pointer(n.data(1+i, "non-empty string"))
+	hdr.Len = l
+	return
+}
+
+func (n name) data(off int, whySafe string) *byte {
+	return (*byte)(add(unsafe.Pointer(n.bytes), uintptr(off), whySafe))
+}
+
+func add(p unsafe.Pointer, x uintptr, whySafe string) unsafe.Pointer {
+	return unsafe.Pointer(uintptr(p) + x)
+}
+
+// readVarint parses a varint as encoded by encoding/binary.
+// It returns the number of encoded bytes and the encoded value.
+func (n name) readVarint(off int) (int, int) {
+	v := 0
+	for i := 0; ; i++ {
+		x := *n.data(off+i, "read varint")
+		v += int(x&0x7f) << (7 * i)
+		if x&0x80 == 0 {
+			return i + 1, v
+		}
+	}
+}
+
 // Struct field
 type structField struct {
 	name   name    // name is always non-empty
